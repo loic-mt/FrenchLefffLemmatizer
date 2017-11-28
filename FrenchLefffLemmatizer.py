@@ -41,7 +41,7 @@ class FrenchLefffLemmatizer(object):
                 line_parts = a_line.split('\t')
                 if line_parts[self.POS] == 'v':
                     line_parts[self.POS] = 'ver'
-                POS_triplet = (line_parts[self.INFLECTED_FORM],line_parts[self.POS],line_parts[self.LEMMA])
+                POS_triplet = (line_parts[self.INFLECTED_FORM],line_parts[self.POS],line_parts[self.LEMMA],line_parts[self.MISC])
                 if (POS_triplet not in set_POS_triplets):
                     set_POS_triplets.add(POS_triplet)
         set_POS_triplets_to_remove = set()
@@ -51,9 +51,9 @@ class FrenchLefffLemmatizer(object):
             for line_add in lefff_additional_data_file:
                 line_add = line_add[:-1]
                 line_add_parts = line_add.split('\t')
-                new_POS_triplet = (line_add_parts[self.INFLECTED_FORM],line_add_parts[self.POS],line_add_parts[self.LEMMA])
+                new_POS_triplet = (line_add_parts[self.INFLECTED_FORM],line_add_parts[self.POS],line_add_parts[self.LEMMA],line_add_parts[self.MISC])
                 try:
-                    old_POS_triplet = (line_add_parts[self.INFLECTED_FORM],line_add_parts[self.POS],line_add_parts[self.OLD_LEMMA])
+                    old_POS_triplet = (line_add_parts[self.INFLECTED_FORM],line_add_parts[self.POS],line_add_parts[self.OLD_LEMMA],line_parts[self.MISC])
                 except IndexError as err:
                         print("Error! ",err)
                         print("Length",len(line_add_parts))
@@ -61,25 +61,31 @@ class FrenchLefffLemmatizer(object):
                         print(line_add_parts[self.INFLECTED_FORM])
                 set_POS_triplets_to_remove.add(old_POS_triplet)
                 set_POS_triplets_to_add.add(new_POS_triplet)
+                
         # Errors found in lefff-3.4.mlex
-        set_POS_triplets_to_remove.add(('chiens','nc','chiens'))
-        set_POS_triplets_to_add.add(('résidente','nc','résident'))
-        set_POS_triplets_to_add.add(('résidentes','nc','résident'))
-        set_POS_triplets_to_remove.add(('traductrice','nc','traductrice'))
+        set_POS_triplets_to_remove.add(('chiens','nc','chiens','mp'))
+        set_POS_triplets_to_add.add(('résidente','nc','résident','fs'))
+        set_POS_triplets_to_add.add(('résidentes','nc','résident','fp'))
+        set_POS_triplets_to_remove.add(('traductrice','nc','traductrice','fs'))
         set_POS_triplets = (set_POS_triplets - set_POS_triplets_to_remove) | set_POS_triplets_to_add                
         # In order to improve the performance we create
         # a dictionary to store the triplets tuples
         lefff_triplets_dict = dict()
+        self.lemma_dict = {}
         # a_triplet => a_triplet[self.INFLECTED_FORM], a_triplet[self.POS], a_triplet[self.LEMMA]
         for a_triplet in set_POS_triplets:
             if self.TRACE:
                 print(a_triplet)
             if not a_triplet[self.INFLECTED_FORM] in lefff_triplets_dict:
                 lefff_triplets_dict[a_triplet[self.INFLECTED_FORM]] = dict()
-                lefff_triplets_dict[a_triplet[self.INFLECTED_FORM]][a_triplet[self.POS]] = a_triplet[self.LEMMA] 
-            else:
-                lefff_triplets_dict[a_triplet[self.INFLECTED_FORM]][a_triplet[self.POS]] = a_triplet[self.LEMMA]   
-        # release the temporary set_POS_triples data structure
+            lefff_triplets_dict[a_triplet[self.INFLECTED_FORM]][a_triplet[self.POS]] = [a_triplet[self.LEMMA], a_triplet[self.MISC]]
+            
+            if a_triplet[self.POS] not in self.lemma_dict:
+                self.lemma_dict[a_triplet[self.POS]] = {}
+            if a_triplet[self.LEMMA] not in self.lemma_dict[a_triplet[self.POS]]:
+                self.lemma_dict[a_triplet[self.POS]][a_triplet[self.LEMMA]] = {}
+            self.lemma_dict[a_triplet[self.POS]][a_triplet[self.LEMMA]][a_triplet[self.MISC]] = a_triplet[self.INFLECTED_FORM]
+            # release the temporary set_POS_triples data structure
         # TODO: in order to save memory, combine set_POS_triples and lefff_triplets_dict 
         del set_POS_triplets
         self.LEFFF_TABLE = lefff_triplets_dict  
@@ -101,7 +107,7 @@ class FrenchLefffLemmatizer(object):
             print(element)
             if index > end:
                 break
-                
+
     def lemmatize(self,word,pos="n"):
         raw_word = word
         if ( not (pos == "np") ):
@@ -134,5 +140,29 @@ class FrenchLefffLemmatizer(object):
             if self.isWordnetAPI(pos):
                 return raw_word
             elif raw_word[0].isupper():
-                return [(raw_word,'np')]
+                return [([raw_word, '?'],'np')]
         return POS_couples_list
+
+    def lemmatize_phrase(self, words, pos, headflag):
+        lemmatized_words = []
+        for w, p, h in zip(words, pos, headflag):
+            if h:
+                try:
+                    form, morph = self.lemmatize(w, pos=p)[0][0]
+                    if morph == 'Kms' or morph == 'Kmp':
+                        if 'Kms' in self.lemma_dict[p][form]:
+                            form = self.lemma_dict[p][form]['Kms']
+                    elif morph == 'fs' or morph == 'fp':
+                        if 'fs' in self.lemma_dict[p][form]:
+                            form = self.lemma_dict[p][form]['fs']
+                    elif morph == 'Kfs' or morph == 'Kfp':
+                        if 'Kfs' in self.lemma_dict[p][form]:
+                            form = self.lemma_dict[p][form]['Kfs']
+                except:
+                    form = w
+            else:
+                form = w
+            lemmatized_words.append(form)
+        return u" ".join(lemmatized_words)
+    
+        
